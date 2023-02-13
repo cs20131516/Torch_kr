@@ -1,0 +1,44 @@
+{
+    "os": "Windows-10-10.0.19044-SP0",
+    "python": "3.9.15",
+    "heartbeatAt": "2023-02-11T11:05:22.539996",
+    "startedAt": "2023-02-11T11:05:21.956467",
+    "docker": null,
+    "cuda": null,
+    "args": [],
+    "state": "running",
+    "program": "C:\\Users\\fight\\Desktop\\Torch_kr\\DQN\\DQN_Discrete.py",
+    "codePath": "DQN_Discrete.py",
+    "host": "DESKTOP-BT0H2KH",
+    "username": "fight",
+    "executable": "C:\\Users\\fight\\anaconda3\\envs\\torch\\python.exe",
+    "cpu_count": 8,
+    "cpu_count_logical": 16,
+    "cpu_freq": {
+        "current": 3801.0,
+        "min": 0.0,
+        "max": 3801.0
+    },
+    "cpu_freq_per_core": [
+        {
+            "current": 3801.0,
+            "min": 0.0,
+            "max": 3801.0
+        }
+    ],
+    "disk": {
+        "total": 476.30956649780273,
+        "used": 327.20594787597656
+    },
+    "gpu": "NVIDIA GeForce RTX 3090",
+    "gpu_count": 1,
+    "gpu_devices": [
+        {
+            "name": "NVIDIA GeForce RTX 3090",
+            "memory_total": 25769803776
+        }
+    ],
+    "memory": {
+        "total": 31.927959442138672
+    }
+}
