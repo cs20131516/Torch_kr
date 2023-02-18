@@ -442,10 +442,15 @@ for i_episode in range(num_episodes):
     last_screen = get_screen()
     current_screen = get_screen()
     state = current_screen - last_screen
+    #reward_current = 0
     for t in count():
         # 행동 선택과 수행
         action = select_action(state)
+        #print(action)
+        #print(t)
         _, reward, done, _, _ = env.step(action.item())
+        #reward_current += reward
+        #print(reward_current)
         reward = torch.tensor([reward], device=device)
 
         # 새로운 상태 관찰

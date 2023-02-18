@@ -16,16 +16,19 @@ import sys
 parser = argparse.ArgumentParser()
 parser.add_argument('--gamma', type=float, default=0.95)
 parser.add_argument('--lr', type=float, default=0.005)
-parser.add_argument('--batch_size', type=int, default=32)
+parser.add_argument('--batch_size', type=int, default=64)
 parser.add_argument('--eps', type=float, default=1.0)
 parser.add_argument('--eps_decay', type=float, default=0.995)
 parser.add_argument('--eps_min', type=float, default=0.01)
 
 args = parser.parse_args()
 
+print(torch.cuda.is_available())
+device = torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
+print(device)
 
 class ReplayBuffer:
-    def __init__(self, capacity=10000):
+    def __init__(self, capacity=2000):
         self.buffer = deque(maxlen=capacity)
 
     def put(self, state, action, reward, next_state, done):
@@ -67,7 +70,7 @@ class ActionStateModel(nn.Module):
         )
         return model
     '''
-
+    '''
     def create_model(self):
         conv1 = nn.Conv2d(3, 16, kernel_size=3, stride=2)
         conv2 = nn.Conv2d(16, 32, kernel_size=3, stride=2)
@@ -76,8 +79,8 @@ class ActionStateModel(nn.Module):
         def conv2d_size_out(size, kernel_size=3, stride=2):
             return (size - (kernel_size - 1) - 1) // stride + 1
 
-        convw = conv2d_size_out(conv2d_size_out(conv2d_size_out(600)))
-        convh = conv2d_size_out(conv2d_size_out(conv2d_size_out(400)))
+        convw = conv2d_size_out(conv2d_size_out(conv2d_size_out(600)))#width
+        convh = conv2d_size_out(conv2d_size_out(conv2d_size_out(400)))#height
         linear_input_size = convw * convh * 32
         fc1 = nn.Linear(linear_input_size, 512)
         fc2 = nn.Linear(512, 256)
@@ -96,6 +99,29 @@ class ActionStateModel(nn.Module):
             fc2,
             nn.ReLU(),
             fc3
+        )
+        return model
+    '''
+
+    def create_model(self):
+        conv1 = nn.Conv2d(3, 32, kernel_size=3, stride=2)
+        conv2 = nn.Conv2d(32, 64, kernel_size=3, stride=2)
+
+        def conv2d_size_out(size, kernel_size=3, stride=2):
+            return (size - (kernel_size - 1) - 1) // stride + 1
+
+        convw = conv2d_size_out(conv2d_size_out(600))  # width
+        convh = conv2d_size_out(conv2d_size_out(400))  # height
+        linear_input_size = convw * convh * 64
+        fc = nn.Linear(linear_input_size, self.action_dim)
+
+        model = nn.Sequential(
+            conv1,
+            nn.ReLU(),
+            conv2,
+            nn.ReLU(),
+            nn.Flatten(),
+            fc
         )
         return model
 
@@ -202,32 +228,40 @@ class Agent:
         epi_rewad = 0
         for ep in range(max_episodes):
             pygame.init()
-            screen = pygame.display.set_mode((600, 400))
+            screen = pygame.display.set_mode((600, 400), pygame.HWSURFACE | pygame.DOUBLEBUF)
             done, total_reward = False, 0
             state = self.env.reset()
             state = np.array(pygame.surfarray.array3d(screen))
-            state = state.transpose((2, 0, 1)) / 255.0
+            state = state.transpose((2, 0, 1)) #/ 255.0
             # state = state.astype(np.float32).reshape(-1)
             #state_tensor = torch.tensor(state, dtype=torch.float32)  # (3, 600, 400)
             epi_rewad = 0
+            i = 0
             while not done:
                 pygame.display.update()
                 action = self.model.get_action(state)
                 _, reward, done = self.step(action)
 
                 next_state = np.array(pygame.surfarray.array3d(screen))
-                next_state = next_state.transpose((2, 0, 1)) / 255.0
+                next_state = next_state.transpose((2, 0, 1)) #/ 255.0
                 #next_state = next_state.astype(np.float32).reshape(-1)
                 #next_state = torch.tensor(next_state, dtype=torch.float32)
-
+                if not done:
+                    reward = reward
+                else:
+                    reward = 0
                 epi_rewad += reward
                 self.buffer.put(state, action, reward, next_state, done)
                 total_reward += reward
                 state = next_state
                 if self.buffer.size() >= args.batch_size:
                     self.replay()
-                pygame.time.delay(250)#1000 -> 1second
-            self.target_update()
+                if i % 50 == 0:
+                    self.target_update()
+                #pygame.time.delay(250)#1000 -> 1second
+                i += 1
+            if i < 50:
+                self.target_update()
             print('EP{} EpisodeReward={}'.format(ep, total_reward))
             f = open("DQN_epi_reward.txt", 'a')
             f.write(epi_rewad.__str__())
