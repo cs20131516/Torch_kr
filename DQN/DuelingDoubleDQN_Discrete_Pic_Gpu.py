@@ -54,7 +54,6 @@ class ActionStateModel(nn.Module):
 
         self.model = self.create_model().to(device)
         self.optimizer = optim.Adam(self.model.parameters(), lr=args.lr)
-        #self.optimizer = optim.RMSprop(self.model.parameters(), lr=args.lr)
 
     def create_model(self):
         conv1 = nn.Conv2d(3, 32, kernel_size=3, stride=2)
@@ -66,20 +65,33 @@ class ActionStateModel(nn.Module):
         convw = conv2d_size_out(conv2d_size_out(600))  # width
         convh = conv2d_size_out(conv2d_size_out(400))  # height
         linear_input_size = convw * convh * 64
-        fc = nn.Linear(linear_input_size, self.action_dim)
+
+        # Dueling Network 구조
+        self.advantage = nn.Sequential(
+            nn.Linear(linear_input_size, 128),
+            nn.LeakyReLU(),
+            nn.Linear(128, self.action_dim)
+        )
+        self.value = nn.Sequential(
+            nn.Linear(linear_input_size, 128),
+            nn.LeakyReLU(),
+            nn.Linear(128, 1)
+        )
 
         model = nn.Sequential(
             conv1,
             nn.LeakyReLU(),
             conv2,
             nn.LeakyReLU(),
-            nn.Flatten(),
-            fc
+            nn.Flatten()
         )
         return model
 
     def forward(self, state):
-        return self.model(state.to(device))
+        x = self.model(state.to(device))
+        advantage = self.advantage(x)
+        value = self.value(x)
+        return value + advantage - advantage.mean(dim=1, keepdim=True)
 
     def get_action(self, state):
         self.epsilon *= args.eps_decay
@@ -97,7 +109,6 @@ class ActionStateModel(nn.Module):
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
-
 
 class Agent:
     def __init__(self, env):
@@ -123,20 +134,16 @@ class Agent:
         self.target_model.load_state_dict(self.model.state_dict())
 
     def replay(self):
-        #for _ in range(10):
         states, actions, rewards, next_states, done = self.buffer.sample()
-        #states = torch.tensor(states, device=self.device, dtype=torch.float32).clone().detach()
-        #actions = torch.tensor(actions, device=self.device, dtype=torch.int64).clone().detach()
-        #rewards = torch.tensor(rewards, device=self.device, dtype=torch.float32).clone().detach()
-        #next_states = torch.tensor(next_states, device=self.device, dtype=torch.float32).clone().detach()
-        #done = torch.tensor(done, device=self.device, dtype=torch.float32).clone().detach()
 
         targets = self.target_model(states)
+
+        # Double DQN 업데이트
         with torch.no_grad():
-            next_q_values = self.target_model(next_states).max(dim=1).values
+            next_actions = self.model(next_states).argmax(dim=1)
+            next_q_values = self.target_model(next_states).gather(1, next_actions.unsqueeze(1)).squeeze(1)
         targets[range(args.batch_size), actions] = rewards + (1 - done) * next_q_values * args.gamma
         loss = nn.MSELoss()(targets, self.model(states))
-        #loss = nn.SmoothL1Loss()(targets, self.model(states))
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
@@ -189,19 +196,19 @@ class Agent:
             if self.buffer.size() >= args.batch_size:
                 self.replay()
             print('EP{} EpisodeReward={} total_step={}'.format(ep, total_reward, i))
-            f = open("DQN_Pic_epi_reward.txt", 'a')
+            f = open("DuelingDoubleDQN_Pic_epi_reward.txt", 'a')
             f.write(epi_rewad.__str__())
             f.write("\n")
             f.close()
             if epi_rewad >= 500:
                 break
         end_time = time.time()
-        f = open("DQN_Pic_complet_time.txt", 'a')
+        f = open("DuelingDoubleDQN_Pic_complet_time.txt", 'a')
         f.write((end_time - start_time).__str__())
         f.write("\n")
         f.close()
         # Close the environment and pygame window
-        torch.save(self.model.state_dict(), "./DQN_Pic_model.pt")
+        torch.save(self.model.state_dict(), "./DuelingDoubleDQN_Pic_model.pt")
         self.env.close()
         pygame.quit()
         sys.exit()
@@ -213,3 +220,16 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+'''
+이제 코드는 Dueling Double DQN을 사용하고 있습니다. 
+
+주요 변경 사항은 다음과 같습니다:
+
+1. `ActionStateModel` 클래스의 `create_model` 메서드에서 Dueling Network 구조를 사용하도록 변경했습니다.
+이 구조는 value와 advantage 두 개의 별도의 스트림을 사용하여 Q-값을 추정합니다.
+
+2. `Agent` 클래스의 `replay` 메서드에서 Double DQN 업데이트를 사용하도록 변경했습니다. 
+이 업데이트는 기본 DQN 대신 현재 Q-네트워크로부터 다음 상태에서의 최적의 행동을 선택하고, 목표 Q-네트워크로부터 해당 행동에 대한 Q-값을 가져옵니다. 
+이렇게 하면 행동 선택과 Q-값 평가 사이의 상관 관계가 줄어들어 안정적인 학습을 도모합니다.
+'''

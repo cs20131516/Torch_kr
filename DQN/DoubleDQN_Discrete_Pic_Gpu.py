@@ -54,7 +54,6 @@ class ActionStateModel(nn.Module):
 
         self.model = self.create_model().to(device)
         self.optimizer = optim.Adam(self.model.parameters(), lr=args.lr)
-        #self.optimizer = optim.RMSprop(self.model.parameters(), lr=args.lr)
 
     def create_model(self):
         conv1 = nn.Conv2d(3, 32, kernel_size=3, stride=2)
@@ -75,7 +74,7 @@ class ActionStateModel(nn.Module):
             nn.LeakyReLU(),
             nn.Flatten(),
             fc
-        )
+            )
         return model
 
     def forward(self, state):
@@ -85,11 +84,8 @@ class ActionStateModel(nn.Module):
         self.epsilon *= args.eps_decay
         self.epsilon = max(self.epsilon, args.eps_min)
         with torch.no_grad():
-            #state = torch.tensor(state, dtype=torch.float32).to(device)
             q_value = self.forward(state).cpu().detach().numpy()[0]
         if random.random() < self.epsilon:
-            #a = random.randint(0, self.action_dim - 1)
-            #print(a)
             return random.randint(0, self.action_dim - 1)
         return np.argmax(q_value)
 
@@ -97,7 +93,6 @@ class ActionStateModel(nn.Module):
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
-
 
 class Agent:
     def __init__(self, env):
@@ -111,40 +106,48 @@ class Agent:
         self.target_update()
 
         self.buffer = ReplayBuffer()
-        #self.optimizer = optim.Adam(self.model.parameters(), lr=args.lr)
-        self.optimizer = optim.RMSprop(self.model.parameters(), lr=args.lr)
+        self.optimizer = optim.Adam(self.model.parameters(), lr=args.lr)
         self.ROWS = 600
         self.COLS = 400
         self.FRAME_STEP = 3
         self.image_memory = np.zeros((self.FRAME_STEP, self.ROWS, self.COLS))
         self.state_size = (self.FRAME_STEP, self.ROWS, self.COLS)
 
+
     def target_update(self):
         self.target_model.load_state_dict(self.model.state_dict())
 
+
     def replay(self):
-        #for _ in range(10):
         states, actions, rewards, next_states, done = self.buffer.sample()
-        #states = torch.tensor(states, device=self.device, dtype=torch.float32).clone().detach()
-        #actions = torch.tensor(actions, device=self.device, dtype=torch.int64).clone().detach()
-        #rewards = torch.tensor(rewards, device=self.device, dtype=torch.float32).clone().detach()
-        #next_states = torch.tensor(next_states, device=self.device, dtype=torch.float32).clone().detach()
-        #done = torch.tensor(done, device=self.device, dtype=torch.float32).clone().detach()
 
-        targets = self.target_model(states)
+        # Double DQN update
+        model_next_actions = self.model(next_states).argmax(dim=1)
         with torch.no_grad():
-            next_q_values = self.target_model(next_states).max(dim=1).values
-        targets[range(args.batch_size), actions] = rewards + (1 - done) * next_q_values * args.gamma
-        loss = nn.MSELoss()(targets, self.model(states))
-        #loss = nn.SmoothL1Loss()(targets, self.model(states))
-        self.optimizer.zero_grad()
-        loss.backward()
-        self.optimizer.step()
+            target_next_q_values = self.target_model(next_states).gather(1, model_next_actions.unsqueeze(1)).squeeze()
+        targets = self.target_model(states)
+        targets[range(args.batch_size), actions] = rewards + (1 - done) * target_next_q_values * args.gamma
 
+        loss = nn.MSELoss()(targets, self.model(states))
+        self.model.update(loss)
+
+    '''
+    코드에서 바뀐 부분은 Agent 클래스의 replay() 메소드입니다. 이 부분에서 기존 DQN의 업데이트 방식을 Double DQN으로 변경했습니다.
+    
+    DQN에서는 다음 Q-값을 추정할 때 동일한 네트워크를 사용하여 가장 큰 값을 선택합니다. 이는 오버 에스티메이션 문제를 초래할 수 있습니다. 오버 에스티메이션 문제란 추정된 Q-값이 실제 Q-값보다 높을 때 발생하는 문제입니다.
+    
+    Double DQN은 이 오버 에스티메이션 문제를 완화하기 위해 두 개의 네트워크를 사용합니다: 하나는 현재 학습 중인 네트워크(온라인 네트워크)이고, 다른 하나는 일정 주기로 업데이트되는 타겟 네트워크입니다. 타겟 네트워크는 온라인 네트워크의 가중치를 복사하여 업데이트됩니다. 이렇게 두 개의 네트워크를 사용함으로써 추정 오류를 줄일 수 있습니다.
+    
+    Double DQN에서의 차이점은 다음과 같습니다:
+    
+    온라인 네트워크를 사용하여 다음 상태에서 최적의 행동을 선택합니다 (model_next_actions).
+    타겟 네트워크를 사용하여 다음 상태에서 선택된 행동의 Q-값을 계산합니다 (target_next_q_values).
+    이러한 변경 사항은 오버 에스티메이션 문제를 완화하고, 훈련 과정에서 더 안정적인 학습을 가능하게 합니다.
+    '''
     def step(self, action):
         next_state, reward, done, _, _ = self.env.step(action)
-        #next_state = self.GetImage()
         return next_state, reward, done
+
 
     def training(self, max_episodes=1000):
         start_time = time.time()
@@ -156,20 +159,17 @@ class Agent:
             done, total_reward = False, 0
             state = self.env.reset()
             state = np.array(pygame.surfarray.array3d(screen))
-            state = state.transpose((2, 0, 1)) #/ 255.0
+            state = state.transpose((2, 0, 1))
             epi_rewad = 0
             i = 0
             while not done:
                 pygame.display.update()
                 state = torch.FloatTensor(state).unsqueeze(0).to(self.device)
                 action = self.model.get_action(state)
-                #print(action)
-                #print(i)
                 _, reward, done = self.step(action)
                 epi_rewad += reward
-                #print(epi_rewad)
                 next_state = np.array(pygame.surfarray.array3d(screen))
-                next_state = next_state.transpose((2, 0, 1)) #/ 255.0
+                next_state = next_state.transpose((2, 0, 1))
 
                 if done:
                     if ep % 10 == 0:
@@ -178,30 +178,30 @@ class Agent:
                 self.buffer.put(state.squeeze().cpu().numpy(), action, reward, next_state, done)
                 total_reward += reward
                 state = next_state
-                #if self.buffer.size() >= args.batch_size:
-                    #self.replay()
-                #if i % 50 == 0:
-                    #self.target_update()
-                #pygame.time.delay(10)#1000 -> 1second
                 i += 1
-            #if i < 50:
-                #self.target_update()
+
             if self.buffer.size() >= args.batch_size:
                 self.replay()
+
             print('EP{} EpisodeReward={} total_step={}'.format(ep, total_reward, i))
-            f = open("DQN_Pic_epi_reward.txt", 'a')
+            f = open("DoubleDQN_Pic_epi_reward.txt", 'a')
             f.write(epi_rewad.__str__())
             f.write("\n")
             f.close()
+
             if epi_rewad >= 500:
                 break
+
         end_time = time.time()
-        f = open("DQN_Pic_complet_time.txt", 'a')
+        f = open("DoubleDQN_Pic_complet_time.txt", 'a')
         f.write((end_time - start_time).__str__())
         f.write("\n")
         f.close()
+
+        # Save the trained model
+        torch.save(self.model.state_dict(), "./DoubleDQN_Pic_model.pt")
+
         # Close the environment and pygame window
-        torch.save(self.model.state_dict(), "./DQN_Pic_model.pt")
         self.env.close()
         pygame.quit()
         sys.exit()
